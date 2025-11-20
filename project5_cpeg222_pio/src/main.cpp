@@ -12,22 +12,25 @@
 
 #define SEALEVELPRESSURE_HPA (1013.25)
 
+volatile bool buttonPressed = false;
 Adafruit_BME280 bme; // I2C
 //Adafruit_BME280 bme(BME_CS); // hardware SPI
 //Adafruit_BME280 bme(BME_CS, BME_MOSI, BME_MISO, BME_SCK); // software SPI
 
 unsigned long delayTime;
 void printValues();
+void handleButtonPress();
 
 void setup() {
     Serial.begin(9600);
     while(!Serial);    // time to get serial running
     Serial.println(F("BME280 test"));
-
+    pinMode(PC13, INPUT_PULLUP);
+    attachInterrupt(digitalPinToInterrupt(PC13), handleButtonPress, FALLING);
     unsigned status;
     
     // default settings
-    status = bme.begin();  
+    status = bme.begin(0x76);  
     // You can also pass in a Wire library object like &Wire2
     // status = bme.begin(0x76, &Wire2)
     if (!status) {
@@ -41,14 +44,19 @@ void setup() {
     }
     
     Serial.println("-- Default Test --");
-    delayTime = 1000;
+    delayTime = 5000;
 
     Serial.println();
 }
 
 
 void loop() { 
-    printValues();
+  if (buttonPressed) {
+        Serial.println("Button pressed!");
+        buttonPressed = false;    
+  }
+  printValues();
+    
     delay(delayTime);
 }
 
@@ -72,4 +80,8 @@ void printValues() {
     Serial.println(" %");
 
     Serial.println();
+}
+
+void handleButtonPress() {
+    buttonPressed = true;
 }
