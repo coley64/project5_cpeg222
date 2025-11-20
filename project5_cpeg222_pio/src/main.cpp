@@ -9,9 +9,16 @@
 #include <SPI.h>
 #include <Adafruit_Sensor.h>
 #include <Adafruit_BME280.h>
+#include <Adafruit_NeoPixel.h>
+#ifdef __AVR__
+#include <avr/power.h> // Required for 16 MHz Adafruit Trinket
+#endif
 
+#define LED_PIN PA0
+#define LED_COUNT 4
 #define SEALEVELPRESSURE_HPA (1013.25)
 
+Adafruit_NeoPixel strip(LED_COUNT, LED_PIN, NEO_GRB + NEO_KHZ800);
 volatile bool buttonPressed = false;
 Adafruit_BME280 bme; // I2C
 //Adafruit_BME280 bme(BME_CS); // hardware SPI
