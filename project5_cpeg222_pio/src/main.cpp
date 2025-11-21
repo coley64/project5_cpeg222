@@ -1,7 +1,4 @@
 /***************************************************************************
-  This is a library for the BME280 humidity, temperature & pressure sensor
-  These sensors use I2C or SPI to communicate, 2 or 4 pins are required
-  to interface. The device's I2C address is either 0x76 or 0x77.
 
  ***************************************************************************/
 
@@ -10,9 +7,20 @@
 #include <Adafruit_Sensor.h>
 #include <Adafruit_BME280.h>
 #include <Adafruit_NeoPixel.h>
-#ifdef __AVR__
-#include <avr/power.h> // Required for 16 MHz Adafruit Trinket
+#include <HardwareTimer.h>
+#ifndef SSD_Array_h
+#define SSD_Array_h
+
+#include "stm32f4xx.h"
+#ifdef __cplusplus
+extern "C" {
 #endif
+void SSD_init(void);
+void SSD_update(int digitSelect, int value, int decimalPoint);
+#ifdef __cplusplus
+}
+#endif
+#endif // SSD_Array.h
 
 #define LED_PIN PA0
 #define LED_COUNT 4
@@ -20,75 +28,151 @@
 
 Adafruit_NeoPixel strip(LED_COUNT, LED_PIN, NEO_GRB + NEO_KHZ800);
 volatile bool buttonPressed = false;
+volatile int state = 0; // 0 = Temp(C), 1 = Temp(F), 2 = Humidity(%), 3 = Pressure(atm)
 Adafruit_BME280 bme; // I2C
-//Adafruit_BME280 bme(BME_CS); // hardware SPI
-//Adafruit_BME280 bme(BME_CS, BME_MOSI, BME_MISO, BME_SCK); // software SPI
+
+volatile bool buttonFlag = false;
+volatile bool serialFlag = false;
+
+float tempC = 0.0f;
+float tempF = 0.0f;
+float humidity = 0.0f;
+float atm = 0.0f;
+
+int digitSelect = 0;
 
 unsigned long delayTime;
 void printValues();
-void handleButtonPress();
+void buttonISR();
+void setColorForState(int state);
+void timerISR();
+void serial_timerISR();
 
 void setup() {
     Serial.begin(9600);
-    while(!Serial);    // time to get serial running
-    Serial.println(F("BME280 test"));
+    while(!Serial);    // lets get serial running!
+    Serial.println("BME280 test");
     pinMode(PC13, INPUT_PULLUP);
-    attachInterrupt(digitalPinToInterrupt(PC13), handleButtonPress, FALLING);
+    attachInterrupt(digitalPinToInterrupt(PC13), buttonISR, FALLING);
+
     unsigned status;
-    
-    // default settings
-    status = bme.begin(0x76);  
-    // You can also pass in a Wire library object like &Wire2
-    // status = bme.begin(0x76, &Wire2)
+    status = bme.begin(0x76); 
+
     if (!status) {
         Serial.println("Could not find a valid BME280 sensor, check wiring, address, sensor ID!");
-        Serial.print("SensorID was: 0x"); Serial.println(bme.sensorID(),16);
-        Serial.print("        ID of 0xFF probably means a bad address, a BMP 180 or BMP 085\n");
-        Serial.print("   ID of 0x56-0x58 represents a BMP 280,\n");
-        Serial.print("        ID of 0x60 represents a BME 280.\n");
-        Serial.print("        ID of 0x61 represents a BME 680.\n");
-        while (1) delay(10);
     }
     
-    Serial.println("-- Default Test --");
-    delayTime = 5000;
+    Serial.println("-- Default Test: Sensor Online! --");
+    
+    // choose delay b/n uart prints- lets go for 5 seconds
+    delayTime = 4500; // 2500 prev
 
     Serial.println();
+    strip.begin();           // INITIALIZE NeoPixel strip object (REQUIRED)
+    strip.setBrightness(25); // Set BRIGHTNESS to about 1/5 (max = 255)
+    setColorForState(state); // Set initial color
+    strip.show();            // Turn OFF all pixels ASAP
+
+    // init timer
+    HardwareTimer *MyTim2 = new HardwareTimer(TIM2);
+    MyTim2->setOverflow(500, HERTZ_FORMAT); // 500 Hz = 2 ms firing, should be enough for ssd right?
+    MyTim2->attachInterrupt(timerISR);
+    MyTim2->resume();
+
+    HardwareTimer *MyTim3 = new HardwareTimer(TIM3);
+    MyTim3->setOverflow(5000000, MICROSEC_FORMAT); // 5 second
+    MyTim3->attachInterrupt(serial_timerISR);
+    MyTim3->resume();
+
+    SSD_init(); // init 7-seg display
 }
 
 
 void loop() { 
-  if (buttonPressed) {
-        Serial.println("Button pressed!");
-        buttonPressed = false;    
-  }
-  printValues();
-    
-    delay(delayTime);
+    tempC = bme.readTemperature();
+    tempF = tempC * 9.0 / 5.0 + 32.0;
+    humidity = bme.readHumidity();
+    atm = bme.readPressure() / 101325.0F;
+    if (buttonFlag) {
+        buttonFlag = false;
+        state = (state + 1) % 4;
+        setColorForState(state);
+    }
+    if (serialFlag){
+        serialFlag = false;
+        printValues();
+    }
 }
-
 
 void printValues() {
-    Serial.print("Temperature = ");
-    Serial.print(bme.readTemperature());
-    Serial.println(" °C");
-
-    Serial.print("Pressure = ");
-
-    Serial.print(bme.readPressure() / 100.0F);
-    Serial.println(" hPa");
-
-    Serial.print("Approx. Altitude = ");
-    Serial.print(bme.readAltitude(SEALEVELPRESSURE_HPA));
-    Serial.println(" m");
-
-    Serial.print("Humidity = ");
-    Serial.print(bme.readHumidity());
-    Serial.println(" %");
-
-    Serial.println();
+    Serial.print("Temp(C) = " + 
+    String(tempC) + 
+    ",\tTemp(F) = " +
+    String(tempF) +
+    +",\tRelHum(%) = " +
+    String(humidity) +
+    ",\tPress(atm) = " +
+    String(atm) +
+    "\n"
+    // "\nState: " + String(state) + "\n" // state debugging
+    );
 }
 
-void handleButtonPress() {
-    buttonPressed = true;
+void buttonISR() {
+    buttonFlag = true;
+ 
+}
+
+// vscode Copilot-generated function... it helps😁!
+void setColorForState(int state) {
+    switch(state) {
+        case 0: // Temp(C)
+            for(int i=0; i<LED_COUNT; i++) {
+                strip.setPixelColor(i, strip.Color(255, 0, 0)); // Red
+            }
+            break;
+        case 1: // Temp(F)
+            for(int i=0; i<LED_COUNT; i++) {
+                strip.setPixelColor(i, strip.Color(128, 0, 128)); // Purple
+            }
+            break;
+        case 2: // Humidity(%)
+            for(int i=0; i<LED_COUNT; i++) {
+                strip.setPixelColor(i, strip.Color(0, 0, 255)); // Blue
+            }
+            break;
+        case 3: // Pressure(atm)
+            for(int i=0; i<LED_COUNT; i++) {
+                strip.setPixelColor(i, strip.Color(0, 255, 0)); // Green
+            }
+            break;
+        default:
+            for(int i=0; i<LED_COUNT; i++) {
+                strip.setPixelColor(i, strip.Color(0, 0, 0)); // Off
+            }
+            break;
+    }
+    strip.show();
+}
+
+void timerISR() {
+    switch(state) {
+        case 0: // Temp(C)
+            SSD_update(digitSelect, tempC*100, 2);
+            break;
+        case 1: // Temp(F)
+            SSD_update(digitSelect, tempF*100, 2);
+            break;
+        case 2: // Humidity(%)
+            SSD_update(digitSelect, humidity*100, 2);
+            break;
+        case 3: // Pressure(atm)
+            SSD_update(digitSelect, atm*1000, 1);
+            break;
+    }
+    digitSelect = (digitSelect + 1) % 4;
+}
+
+void serial_timerISR(){
+    serialFlag = true;
 }
